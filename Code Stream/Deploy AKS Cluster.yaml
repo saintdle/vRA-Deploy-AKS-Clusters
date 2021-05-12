@@ -1,0 +1,311 @@
+---
+project: deanl-cloud-init
+kind: PIPELINE
+name: Deploy AKS Cluster
+icon: organization,left, is-warning
+enabled: true
+concurrency: 10
+input:
+  Add_to_Cloud_Assembly: 'Yes'
+  Add_to_Code_Stream: 'Yes'
+  Add_to_TMC: 'Yes'
+  Azure_Region: westus
+  Cluster_Name: ''
+  Node_count: '3'
+  Node_instance_size: Standard_DS2_v2
+  Nodepool_name: Standard
+  Project: ''
+  resource_group: aks-rg
+_inputMeta:
+  Project:
+    mandatory: true
+    description: Provide vRA Project name for k8s endpoints to be attached
+  Azure_Region:
+    mandatory: true
+    description: Set Azure region to deploy to
+  Node_instance_size:
+    mandatory: true
+    description: Provide an instance size to use for the AKS cluster nodes
+  resource_group:
+    mandatory: true
+    description: Set name of resource group to be created and deploy AKS into
+  Add_to_TMC:
+    mandatory: true
+    description: Add Cluster to Tanzu Mission Control = Yes or No
+  Add_to_Cloud_Assembly:
+    mandatory: true
+    description: Add Cluster to Cloud Assembly as K8s endpoint = Yes or No
+  Node_count:
+    mandatory: true
+    description: Set number of AKS nodes to be deployed
+  Add_to_Code_Stream:
+    mandatory: true
+    description: Add Cluster to Code Stream as K8s endpoint = Yes or No
+  Cluster_Name:
+    mandatory: true
+    description: Provide a name for the EKS Cluster
+  Nodepool_name:
+    mandatory: true
+    description: 'Provide a name for the AKS Cluster node pool. Must conform to the following pattern:
+      ''^[a-z][a-z0-9]{0,11}$'''
+workspace:
+  endpoint: Dean-docker-host2
+  image: mcr.microsoft.com/azure-cli:latest
+  registry: ''
+  path: ''
+  autoCloneForTrigger: false
+  limits:
+    cpu: 1.0
+    memory: 512
+stageOrder:
+- Build AKS Cluster
+- Add AKS Cluster to vRA
+- Add AKS to TMC
+stages:
+  Build AKS Cluster:
+    taskOrder:
+    - Install additional tools
+    - Build AKS Cluster
+    tasks:
+      Build AKS Cluster:
+        type: CI
+        input:
+          steps:
+          - az login --service-principal --username ${var.aks_app_id} --password ${var.aks_app_password}
+            --tenant ${var.aks_tennant_id}
+          - ''
+          - az group create --name ${input.resource_group} --location ${input.Azure_Region}
+          - ''
+          - az aks create --resource-group ${input.resource_group} --name ${input.Cluster_Name} --node-count
+            ${input.Node_count} --node-vm-size ${input.Node_instance_size} --nodepool-name ${input.Nodepool_name}  --generate-ssh-keys
+          export: [
+            ]
+          artifacts: [
+            ]
+          process: [
+            ]
+      Install additional tools:
+        type: CI
+        input:
+          steps:
+          - curl -LO https://storage.googleapis.com/kubernetes-release/release/v1.15.1/bin/linux/amd64/kubectl
+          - ''
+          - chmod u+x kubectl && mv kubectl /bin/kubectl
+          - ''
+          - ''
+          export: [
+            ]
+          artifacts: [
+            ]
+          process: [
+            ]
+  Add AKS to TMC:
+    taskOrder:
+    - Get TMC API Token
+    - Create TMC cluster attach task
+    - Install TMC to Cluster
+    tasks:
+      Create TMC cluster attach task:
+        type: REST
+        preCondition: ${input.Add_to_TMC} == "Yes"
+        input:
+          action: post
+          url: https://${var.eks-tmc-url}/v1alpha1/clusters
+          headers:
+            Accept: application/json
+            Content-Type: application/json
+            Authorization: Bearer ${Add AKS to TMC.Get TMC API Token.output.responseBody.access_token}
+          payload: '{"cluster":{"fullName":{"managementClusterName":"attached","provisionerName":"attached","name":"${input.Cluster_Name}"},"meta":{},"spec":{"clusterGroupName":"default"}}}'
+      Install TMC to Cluster:
+        type: CI
+        preCondition: ${input.Add_to_TMC} == "Yes"
+        input:
+          steps:
+          - ''
+          - kubectl create -f "${Add AKS to TMC.Create TMC cluster attach task.output.responseBody.cluster.status.installerLink}"
+          - ''
+          - currentstatus=$(curl --location --request GET 'https://${var.eks-tmc-url}/v1alpha1/clusters/${input.Cluster_Name}?full_name.managementClusterName=attached&full_name.provisionerName=attached'
+            \
+          - '--header ''Authorization: Bearer ${Add AKS to TMC.Get TMC API Token.output.responseBody.access_token}''
+            | jq ''.cluster.status.health'' | sed ''s/"//g'' )'
+          - statusdone=HEALTHY
+          - while [ $currentstatus != $statusdone ]
+          - do
+          - '  echo "Waiting for Cluster to Synchronise with TMC"'
+          - '  sleep 15'
+          - '  currentstatus=$(curl --location --request GET ''https://${var.eks-tmc-url}/v1alpha1/clusters/${input.Cluster_Name}?full_name.managementClusterName=attached&full_name.provisionerName=attached''
+            \'
+          - '--header ''Authorization: Bearer ${Add AKS to TMC.Get TMC API Token.output.responseBody.access_token}''
+            | jq ''.cluster.status.health'' | sed ''s/"//g'' )'
+          - done
+          export: [
+            ]
+          artifacts: [
+            ]
+          process: [
+            ]
+      Get TMC API Token:
+        type: REST
+        preCondition: ${input.Add_to_TMC} == "Yes"
+        input:
+          action: post
+          url: https://console.cloud.vmware.com/csp/gateway/am/api/auth/api-tokens/authorize?refresh_token=${var.eks-tmc-token}
+          headers:
+            Accept: application/json
+            Content-Type: application/json
+          payload: ''
+  Add AKS Cluster to vRA:
+    taskOrder:
+    - Accessing the AKS Cluster
+    - Create Cluster Service Account
+    - Get AKS Cluster details,Get vRA Cloud API Token,Create Role Binding
+    - Create Code Stream Endpoint,Create Cloud Assembly K8s Endpoint
+    tasks:
+      Create Cloud Assembly K8s Endpoint:
+        type: REST
+        preCondition: ${input.Add_to_Cloud_Assembly} == "Yes"
+        input:
+          action: post
+          url: https://api.mgmt.cloud.vmware.com/cmx/api/resources/k8s/clusters/
+          headers:
+            Accept: application/json
+            Content-Type: application/json
+            Authorization: Bearer ${Add AKS Cluster to vRA.Get vRA Cloud API Token.output.responseBody.access_token}
+          payload: |-
+            {
+              "name": "${input.Cluster_Name}",
+              "description": "Cluster created from Pipeline",
+              "address": "${Add AKS Cluster to vRA.Get AKS Cluster details.output.exports.APISERVERNOPORT}",
+              "credentials": {
+                "privateKey": "${Add AKS Cluster to vRA.Get AKS Cluster details.output.exports.TOKEN}",
+                "type": "Bearer"
+              },
+              "clusterType": "EXTERNAL",
+              "caCertificate": "${Add AKS Cluster to vRA.Get AKS Cluster details.output.exports.clusterCACertificate}",
+              "shared": "true",
+              "global": "true"
+            }
+      Create Role Binding:
+        type: CI
+        preCondition: ${input.Add_to_Code_Stream} == "Yes" || ${input.Add_to_Cloud_Assembly} == "Yes"
+        input:
+          steps:
+          - tee svc-rbac.yaml > /dev/null << EOF
+          - 'apiVersion: rbac.authorization.k8s.io/v1'
+          - 'kind: ClusterRoleBinding'
+          - 'metadata:'
+          - '  name: vra-admin'
+          - 'roleRef:'
+          - '  apiGroup: rbac.authorization.k8s.io'
+          - '  kind: ClusterRole'
+          - '  name: cluster-admin'
+          - 'subjects:'
+          - '  - kind: ServiceAccount'
+          - '    name: vra-admin'
+          - '    namespace: kube-system'
+          - EOF
+          - ''
+          - kubectl apply -f svc-rbac.yaml
+          export: [
+            ]
+          artifacts: [
+            ]
+          process: [
+            ]
+      Create Code Stream Endpoint:
+        type: REST
+        preCondition: ${input.Add_to_Code_Stream} == "Yes"
+        input:
+          action: post
+          url: https://api.mgmt.cloud.vmware.com/pipeline/api/endpoints
+          headers:
+            Accept: application/json
+            Content-Type: application/json
+            Authorization: Bearer ${Add AKS Cluster to vRA.Get vRA Cloud API Token.output.responseBody.access_token}
+          payload: |-
+            {
+              "project": "${input.Project}",
+              "kind": "ENDPOINT",
+              "name": "${input.Cluster_Name}",
+              "description": "Cluster Created From Pipeline",
+              "tags": [],
+              "type": "k8s",
+              "isRestricted": "false",
+              "cloudProxyId": "6bbc1cbb-b091-4c14-852b-a32ba5169150",
+              "properties": {
+                "kubernetesURL": "${Add AKS Cluster to vRA.Get AKS Cluster details.output.exports.APISERVER}",
+                "authType": "token",
+                "token": "${Add AKS Cluster to vRA.Get AKS Cluster details.output.exports.TOKEN}",
+                "fingerprint": "${Add AKS Cluster to vRA.Get AKS Cluster details.output.exports.FINGERPRINT}"
+              }
+            }
+      Get AKS Cluster details:
+        type: CI
+        preCondition: ${input.Add_to_Code_Stream} == "Yes" || ${input.Add_to_Cloud_Assembly} == "Yes"
+        input:
+          steps:
+          - export APISERVER=$(kubectl config view --minify | grep server | cut -f 2- -d ":" | tr -d "
+            ")
+          - APISERVERNOHTTPS=$(echo $APISERVER | cut -c 9-)
+          - ''
+          - FPRINT=$(openssl s_client -connect $APISERVERNOHTTPS < /dev/null 2>/dev/null | openssl x509
+            -fingerprint -sha256 -noout -in /dev/stdin)
+          - export FINGERPRINT=$(echo $FPRINT | cut -c 20-)
+          - TOKENNAME=$(kubectl -n kube-system get serviceaccount/vra-admin -o jsonpath='{.secrets[0].name}')
+          - export TOKEN=$(kubectl -n kube-system get secret $TOKENNAME -o jsonpath='{.data.token}'| base64
+            -d)
+          - export clusterCACertificate=$(kubectl config view --minify --raw -o json | jq '.clusters[0].cluster["certificate-authority-data"]'
+            | sed 's/"//g' )
+          - export APISERVERNOPORT=$(echo $APISERVER | sed 's/:443//g' )
+          export:
+          - TOKEN
+          - FINGERPRINT
+          - APISERVER
+          - clusterCACertificate
+          - APISERVERNOPORT
+          artifacts: [
+            ]
+          process: [
+            ]
+      Get vRA Cloud API Token:
+        type: REST
+        preCondition: ${input.Add_to_Code_Stream} == "Yes" || ${input.Add_to_Cloud_Assembly} == "Yes"
+        input:
+          action: post
+          url: https://console.cloud.vmware.com/csp/gateway/am/api/auth/api-tokens/authorize?refresh_token=${var.eks-vra-token}
+          headers:
+            Accept: application/json
+            Content-Type: application/json
+          payload: ''
+      Accessing the AKS Cluster:
+        type: CI
+        input:
+          steps:
+          - az aks get-credentials --resource-group ${input.resource_group} --name ${input.Cluster_Name}
+          - ''
+          - kubectl config use-context ${input.Cluster_Name}
+          export: [
+            ]
+          artifacts: [
+            ]
+          process: [
+            ]
+      Create Cluster Service Account:
+        type: CI
+        input:
+          steps:
+          - tee cluster_sa.yaml > /dev/null << EOF
+          - 'apiVersion: v1'
+          - 'kind: ServiceAccount'
+          - 'metadata:'
+          - '  name: vra-admin'
+          - '  namespace: kube-system'
+          - EOF
+          - ''
+          - kubectl apply -f cluster_sa.yaml
+          export: [
+            ]
+          artifacts: [
+            ]
+          process: [
+            ]
