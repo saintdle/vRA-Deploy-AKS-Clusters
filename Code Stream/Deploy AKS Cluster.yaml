@@ -1,5 +1,5 @@
 ---
-project: deanl-cloud-init
+project: <CHANGE ME!>
 kind: PIPELINE
 name: Deploy AKS Cluster
 icon: organization,left, is-warning
