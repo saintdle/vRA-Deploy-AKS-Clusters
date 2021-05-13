@@ -13,7 +13,7 @@ input:
   Cluster_Name: ''
   Node_count: '3'
   Node_instance_size: Standard_DS2_v2
-  Nodepool_name: Standard
+  Nodepool_name: standard
   Project: ''
   resource_group: aks-rg
 _inputMeta:
@@ -52,7 +52,7 @@ workspace:
   endpoint: Dean-docker-host2
   image: mcr.microsoft.com/azure-cli:latest
   registry: ''
-  path: ''
+  path: /workingDir
   autoCloneForTrigger: false
   limits:
     cpu: 1.0
@@ -78,10 +78,15 @@ stages:
           - ''
           - az aks create --resource-group ${input.resource_group} --name ${input.Cluster_Name} --node-count
             ${input.Node_count} --node-vm-size ${input.Node_instance_size} --nodepool-name ${input.Nodepool_name}  --generate-ssh-keys
+          - ''
+          - ''
+          - mv /root/.ssh/id_rsa /workingDir/
+          - mv /root/.ssh/id_rsa.pub /workingDir/
           export: [
             ]
-          artifacts: [
-            ]
+          artifacts:
+          - id_rsa
+          - id_rsa.pub
           process: [
             ]
       Install additional tools:
