@@ -3,6 +3,7 @@
 This repository contains the configurations for the following;
 - Create a Code Stream Pipeline
   - Create a Azure AKS Cluster
+    - Saves SSH keys to Docker Host "SharedPath" folder
   - Create AKS cluster as endpoint in both Code Stream and Cloud Assembly
   - Register AKS cluster in Tanzu Mission Control
   
