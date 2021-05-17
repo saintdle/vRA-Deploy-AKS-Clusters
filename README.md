@@ -12,5 +12,5 @@ Prerequisites
   - The pipeline can be changed easily for use with vRA on-prem
 - Azure Account that can provision AKS clusters
 - Docker host to be used by Code Stream
-  - Ability to run the container image: [mcr.microsoft.com/azure-cli](mcr.microsoft.com/azure-cli:latest)
+  - Ability to run the container image: [mcr.microsoft.com/azure-cli](https://mcr.microsoft.com/azure-cli)
 - Tanzu Mission Control Account that can register new clusters
