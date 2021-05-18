@@ -14,3 +14,6 @@ Prerequisites
 - Docker host to be used by Code Stream
   - Ability to run the container image: [mcr.microsoft.com/azure-cli](https://mcr.microsoft.com/azure-cli)
 - Tanzu Mission Control Account that can register new clusters
+
+Getting Started
+- https://veducate.co.uk/vra-deploy-aks-tmc/
