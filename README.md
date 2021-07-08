@@ -16,4 +16,4 @@ Prerequisites
 - Tanzu Mission Control Account that can register new clusters
 
 Getting Started
-- https://veducate.co.uk/vra-deploy-aks-tmc/
+- [Deploying Azure AKS Clusters and registering with Tanzu Mission Control with vRealize Automation](https://dy.si/XAjAZ)
